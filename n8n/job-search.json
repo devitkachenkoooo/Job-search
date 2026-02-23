@@ -1,0 +1,503 @@
+{
+  "name": "job-search",
+  "nodes": [
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT \n    title, \n    company, \n    link, \n    ai_score, \n    ai_reason, \n    source, \n    created_at\nFROM job_search_vacancies\nORDER BY ai_score DESC, created_at DESC;",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        1984,
+        -304
+      ],
+      "id": "784faa0c-7240-4839-ba49-332efea1bf53",
+      "name": "Execute a SQL query",
+      "credentials": {
+        "postgres": {
+          "id": "AhIjajhZwpz1lMF3",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "https://djinni.co/jobs/rss/?primary_keyword=No%20Code&exp_level=no_exp&exp_level=1y",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.rssFeedRead",
+      "typeVersion": 1.2,
+      "position": [
+        1072,
+        -32
+      ],
+      "id": "634e4ddf-2bdd-4b97-8f02-6c1febe4078f",
+      "name": "RSS Read",
+      "notes": "Джині ванасії"
+    },
+    {
+      "parameters": {
+        "url": "https://jobs.dou.ua/vacancies/feeds/?search=No%20Code&exp=0-1",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "User-Agent",
+              "value": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        656,
+        176
+      ],
+      "id": "a21f5c0a-c0ce-4121-b7f3-7f239a5b5605",
+      "name": "HTTP Request"
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "n8n-nodes-base.xml",
+      "typeVersion": 1,
+      "position": [
+        864,
+        176
+      ],
+      "id": "bf8e0c2f-fa8c-49f4-95f4-f6c619a362cf",
+      "name": "XML"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Ми беремо шлях, який ти бачив у себе в Output, і перетворюємо його на список\nconst items = $input.first().json.rss.channel.item;\n\n// Якщо вакансія лише одна, DOU присилає її як об'єкт. \n// Якщо багато — як масив. Робимо, щоб завжди був масив для n8n:\nreturn Array.isArray(items) ? items.map(i => ({ json: i })) : [{ json: items }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1072,
+        176
+      ],
+      "id": "e1f1b865-7fa4-4bf9-9c60-5d4d67578037",
+      "name": "Code in JavaScript"
+    },
+    {
+      "parameters": {
+        "url": "https://www.work.ua/jobs-remote-nocode/",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        656,
+        384
+      ],
+      "id": "de76e4b0-d203-45ad-9f35-4c53ff66457b",
+      "name": "HTTP Request1"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Беремо перший об'єкт з вхідних даних\nconst data = items[0].json;\n\nconst results = [];\n\n// Проходимо по масиву заголовків (їх 4, як і вакансій)\nfor (let i = 0; i < data.title.length; i++) {\n  results.push({\n    json: {\n      title: data.title[i],\n      // В описі беремо кожен другий елемент (0, 2, 4, 6), бо між ними сміття\n      description: data.description[i * 2] \n        ? data.description[i * 2].replace(/\\n/g, ' ').trim() \n        : '',\n      link: 'https://www.work.ua' + data.link[i],\n      pubDate: data.pubDate[i]\n    }\n  });\n}\n\nreturn results;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1072,
+        384
+      ],
+      "id": "0439e1b1-257c-4a95-8310-8da57b9b30fd",
+      "name": "Code in JavaScript1"
+    },
+    {
+      "parameters": {
+        "operation": "extractHtmlContent",
+        "extractionValues": {
+          "values": [
+            {
+              "key": "title",
+              "cssSelector": ".card h2 a",
+              "returnArray": true
+            },
+            {
+              "key": "description",
+              "cssSelector": ".card p",
+              "returnArray": true
+            },
+            {
+              "key": "link",
+              "cssSelector": ".card h2 a",
+              "returnValue": "attribute",
+              "attribute": "href",
+              "returnArray": true
+            },
+            {
+              "key": "pubDate",
+              "cssSelector": ".card time",
+              "returnValue": "attribute",
+              "attribute": "datetime",
+              "returnArray": true
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.html",
+      "typeVersion": 1.2,
+      "position": [
+        864,
+        384
+      ],
+      "id": "51b4ea30-0e10-43fb-b280-6f39e2712403",
+      "name": "HTML"
+    },
+    {
+      "parameters": {
+        "jsCode": "const allItems = $input.all();\n\nconst cleanData = allItems.map(item => {\n  const job = item.json;\n  \n  // Очищаємо текст від HTML-тегів, зайвих переносів рядків та пробілів\n  const cleanDescription = (job.content || job.contentSnippet || \"\")\n    .replace(/<[^>]*>/g, ' ') // Видаляємо всі HTML теги\n    .replace(/\\s+/g, ' ')     // Замінюємо кілька пробілів/ентерів на один пробіл\n    .trim();\n\n  return {\n    title: job.title,\n    link: job.link,\n    // Тепер текст важить набагато менше, але сенс залишився\n    description: cleanDescription, \n    source: job.link.includes('djinni.co') ? 'Djinni' : 'DOU'\n  };\n});\n\nreturn {\n  total_count: cleanData.length,\n  all_jobs: cleanData,\n};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1664,
+        224
+      ],
+      "id": "8af3ac15-e994-4528-a1f5-abdfcb408880",
+      "name": "Code in JavaScript2"
+    },
+    {
+      "parameters": {
+        "numberInputs": 3
+      },
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        1440,
+        208
+      ],
+      "id": "f1ecb8be-8aec-43bd-a2ba-267b19c8584d",
+      "name": "Merge"
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        368,
+        112
+      ],
+      "id": "4fcc5d83-c4b2-4d66-8b22-3edd24215eac",
+      "name": "When clicking ‘Execute workflow’"
+    },
+    {
+      "parameters": {
+        "model": "llama-3.3-70b-versatile",
+        "options": {
+          "temperature": 0
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatGroq",
+      "typeVersion": 1,
+      "position": [
+        1904,
+        448
+      ],
+      "id": "6b077bc5-eebc-483c-9547-bb6d1b7ae23d",
+      "name": "Groq Chat Model",
+      "credentials": {
+        "groqApi": {
+          "id": "7YNZbFiesFh7QRK1",
+          "name": "Groq account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=Act as a professional data analyst. Filter and transform the provided job list into a strictly valid JSON array.\n\n### FILTERING CRITERIA:\n1. ONLY include jobs related to: No-code, Low-code, Automation, AI, Software Development (Python, JS, etc.), or Data Engineering.\n2. EXCLUDE everything else: Sales, Marketing, HR, Logistics, Construction, or Manual Management.\n3. If no jobs match these categories, return an empty array [].\n\n### RULES:\n1. Output ONLY the raw JSON array. No explanations, no markdown blocks.\n2. Fields to create for each job:\n   - \"title\": Job title.\n   - \"company\": Company name.\n   - \"link\": Full URL.\n   - \"description\": Short summary (max 200 chars).\n   - \"source\": \"Djinni\", \"DOU\", or \"Work.ua\".\n   - \"ai_score\": Rate from 1.0 to 5.0 (5.0 is perfect for Automation/AI/n8n/No-code).\n   - \"ai_reason\": One short sentence in Ukrainian explaining why you gave this score based on the relevance to automation.\n\n### DATA TO PROCESS:\n{{ JSON.stringify($json.all_jobs) }}",
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 3.1,
+      "position": [
+        1920,
+        48
+      ],
+      "id": "0f040f52-b50b-4afa-ac1e-05e8c7c79b5c",
+      "name": "AI Agent"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "TRUNCATE TABLE job_search_vacancies RESTART IDENTITY;",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        2576,
+        -16
+      ],
+      "id": "7fe8163c-a443-4b36-8b1c-6ac8017bc739",
+      "name": "Execute a SQL query2",
+      "executeOnce": true,
+      "credentials": {
+        "postgres": {
+          "id": "AhIjajhZwpz1lMF3",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO job_search_vacancies (title, company, link, ai_score, ai_reason)\nVALUES (\n  $${{ $($json).item.json.title }}$$, \n  $${{ $($json).item.json.company }}$$, \n  $${{ $($json).item.json.link }}$$,\n  {{ $($json).item.json.ai_score }},\n  $${{ $($json).item.json.ai_reason }}$$\n);",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        3040,
+        -16
+      ],
+      "id": "6bb4f3ef-9f53-42b2-8c04-a74d3d86c10b",
+      "name": "Execute a SQL query1",
+      "credentials": {
+        "postgres": {
+          "id": "AhIjajhZwpz1lMF3",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Отримуємо перший елемент з попередньої ноди\nconst items = $input.all();\n\nif (items.length === 0) {\n  throw new Error(\"Немає даних від AI агента\");\n}\n\n// Витягуємо текст з поля output (це те, що згенерував AI)\nconst rawOutput = items[0].json.output;\n\nif (!rawOutput) {\n  throw new Error(\"Поле 'output' порожнє або не знайдено\");\n}\n\ntry {\n  // Очищаємо від можливих markdown-символів (якщо AI раптом додав ```json)\n  const cleanString = rawOutput.replace(/```json/g, '').replace(/```/g, '').trim();\n  \n  // Парсимо в масив\n  const parsedData = JSON.parse(cleanString);\n\n  // Перетворюємо в окремі items для n8n\n  return parsedData.map(item => ({\n    json: {\n      title: item.title || \"Без назви\",\n      company: item.company || \"Не вказано\",\n      link: item.link || \"\",\n      description: item.description || \"\",\n      source: item.source || \"Unknown\",\n      ai_score: item.ai_score ? parseFloat(item.ai_score) : 0,\n      ai_reason: item.ai_reason || \"Аналіз відсутній\"\n    }\n  }));\n\n} catch (e) {\n  throw new Error(\"Помилка парсингу: \" + e.message + \". Вхідні дані: \" + rawOutput.substring(0, 100));\n}"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2336,
+        -16
+      ],
+      "id": "e6da9acb-2e86-47af-bec3-4504b5854388",
+      "name": "AftreAgent"
+    },
+    {
+      "parameters": {
+        "jsCode": "return $('AftreAgent').all();"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2800,
+        -16
+      ],
+      "id": "b4c3c88c-a4df-4490-8e4f-0400c484879d",
+      "name": "Code in JavaScript3"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "RSS Read": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request": {
+      "main": [
+        [
+          {
+            "node": "XML",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "XML": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request1": {
+      "main": [
+        [
+          {
+            "node": "HTML",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTML": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript1": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 2
+          }
+        ]
+      ]
+    },
+    "Merge": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript2": {
+      "main": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "When clicking ‘Execute workflow’": {
+      "main": [
+        [
+          {
+            "node": "RSS Read",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "HTTP Request",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "HTTP Request1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Execute a SQL query": {
+      "main": [
+        []
+      ]
+    },
+    "Groq Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Agent": {
+      "main": [
+        [
+          {
+            "node": "AftreAgent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Execute a SQL query2": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript3",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AftreAgent": {
+      "main": [
+        [
+          {
+            "node": "Execute a SQL query2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Execute a SQL query1": {
+      "main": [
+        []
+      ]
+    },
+    "Code in JavaScript3": {
+      "main": [
+        [
+          {
+            "node": "Execute a SQL query1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false
+  },
+  "versionId": "aa74ffa4-9e53-49fd-ae49-c374298c0ab6",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "c5674022872009769c8b83e3189e707e15b254c1b9e48d6b8e871f168c7daed1"
+  },
+  "id": "kheOwbwnfXDgCa2Q",
+  "tags": []
+}
