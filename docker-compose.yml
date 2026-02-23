@@ -1,0 +1,43 @@
+﻿services:
+  job-search-db:
+    image: postgres:15
+    container_name: job-search-db
+    restart: always
+    environment:
+      - POSTGRES_USER=${POSTGRES_USER}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - POSTGRES_DB=${POSTGRES_DB}
+    volumes:
+      - ./init-db:/docker-entrypoint-initdb.d
+      - db_data:/var/lib/postgresql/data
+    networks:
+      - job-search-network
+
+  job-search-n8n:
+    image: n8nio/n8n:latest
+    container_name: job-search-n8n
+    restart: always
+    ports:
+      - "5678:5678"
+    environment:
+      - DB_TYPE=${DB_TYPE}
+      - DB_POSTGRESDB_DATABASE=${DB_POSTGRESDB_DATABASE}
+      - DB_POSTGRESDB_HOST=${DB_POSTGRESDB_HOST}
+      - DB_POSTGRESDB_PORT=${DB_POSTGRESDB_PORT}
+      - DB_POSTGRESDB_USER=${DB_POSTGRESDB_USER}
+      - DB_POSTGRESDB_PASSWORD=${DB_POSTGRESDB_PASSWORD}
+      - N8N_ENCRYPTION_KEY=${N8N_ENCRYPTION_KEY}
+    depends_on:
+      - job-search-db
+    volumes:
+      - n8n_data:/home/node/.n8n
+    networks:
+      - job-search-network
+
+volumes:
+  db_data:
+  n8n_data:
+
+networks:
+  job-search-network:
+    driver: bridge
