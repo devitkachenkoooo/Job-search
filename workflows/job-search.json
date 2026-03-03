@@ -1,0 +1,751 @@
+{
+  "name": "job-search",
+  "nodes": [
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "n8n-nodes-base.xml",
+      "typeVersion": 1,
+      "position": [
+        2912,
+        832
+      ],
+      "id": "7dbd4967-18fa-4087-9f6b-ef754a8a9e80",
+      "name": "XML1"
+    },
+    {
+      "parameters": {
+        "operation": "extractHtmlContent",
+        "extractionValues": {
+          "values": [
+            {
+              "key": "title",
+              "cssSelector": ".card h2 a",
+              "returnArray": true
+            },
+            {
+              "key": "description",
+              "cssSelector": ".card p",
+              "returnArray": true
+            },
+            {
+              "key": "link",
+              "cssSelector": ".card h2 a",
+              "returnValue": "attribute",
+              "attribute": "href",
+              "returnArray": true
+            },
+            {
+              "key": "pubDate",
+              "cssSelector": ".card time",
+              "returnValue": "attribute",
+              "attribute": "datetime",
+              "returnArray": true
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.html",
+      "typeVersion": 1.2,
+      "position": [
+        2912,
+        1040
+      ],
+      "id": "20a5355f-1f6d-4950-adf0-7079f9fbaf68",
+      "name": "HTML1"
+    },
+    {
+      "parameters": {
+        "numberInputs": 4
+      },
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        3488,
+        864
+      ],
+      "id": "26a3a760-2345-4c63-81a4-9395c7f52e57",
+      "name": "Merge1"
+    },
+    {
+      "parameters": {
+        "model": "llama-3.3-70b-versatile",
+        "options": {
+          "temperature": 0.3
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatGroq",
+      "typeVersion": 1,
+      "position": [
+        3968,
+        1040
+      ],
+      "id": "63f6d589-dae7-49b1-b729-dbbf613673ec",
+      "name": "Groq Chat Model1",
+      "credentials": {
+        "groqApi": {
+          "id": "7YNZbFiesFh7QRK1",
+          "name": "Groq account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "hours",
+              "hoursInterval": 3
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.3,
+      "position": [
+        2240,
+        496
+      ],
+      "id": "fe0d06bb-3b3d-4c44-8582-6bcfb9000372",
+      "name": "Schedule Trigger1"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "TRUNCATE TABLE job_search_vacancies RESTART IDENTITY;",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        4528,
+        656
+      ],
+      "id": "46d1ac9a-2429-4061-a42f-3be2d68ccb0f",
+      "name": "Clear old vacancies1",
+      "executeOnce": true,
+      "credentials": {
+        "postgres": {
+          "id": "AhIjajhZwpz1lMF3",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "return $('Parse AI responce1').all();"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4736,
+        656
+      ],
+      "id": "66551ca1-4a49-4dc2-a74e-d7ace364e1e7",
+      "name": "Return data for insertion1"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO job_search_vacancies (title, company, link, ai_score, ai_reason)\nVALUES (\n  $${{ $json.title }}$$, \n  $${{ $json.company }}$$, \n  $${{ $json.link }}$$,\n  {{ $json.ai_score }},\n  $${{ $json.ai_reason }}$$\n);",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        4976,
+        656
+      ],
+      "id": "b1f9912a-51fd-4fe9-8d6b-eabffe158e52",
+      "name": "insertinon of new vacancies1",
+      "credentials": {
+        "postgres": {
+          "id": "AhIjajhZwpz1lMF3",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Отримуємо перший елемент з попередньої ноди\nconst items = $input.all();\n\nif (items.length === 0) {\n  return [{ json: { error: \"Немає даних від AI агента\" } }];\n}\n\n// Витягуємо текст з поля output (це те, що згенерував AI)\nconst rawOutput = items[0].json.output;\n\nif (!rawOutput) {\n  return [{ json: { error: \"Поле 'output' порожнє або не знайдено\" } }];\n}\n\ntry {\n  // Очищаємо від можливих markdown-символів (якщо AI раптом додав ```json)\n  const cleanString = rawOutput.replace(/```json/g, '').replace(/```/g, '').trim();\n  \n  // Парсимо в масив\n  const parsedData = JSON.parse(cleanString);\n\n  // Перетворюємо в окремі items для n8n\n  const result = parsedData.map(item => ({\n    json: {\n      title: item.title || \"Без назви\",\n      company: item.company || \"Не вказано\",\n      link: item.link || \"\",\n      description: item.description || \"\",\n      source: item.source || \"Unknown\",\n      ai_score: item.ai_score ? parseFloat(item.ai_score) : 0,\n      ai_reason: item.ai_reason || \"Аналіз відсутній\"\n    }\n  }));\n\n  return result;\n\n} catch (e) {\n  return [{ json: { error: \"Помилка парсингу: \" + e.message + \". Вхідні дані: \" + rawOutput.substring(0, 100) } }];\n}"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4336,
+        656
+      ],
+      "id": "79f36eb3-e355-43f8-adaa-95cb89d39775",
+      "name": "Parse AI responce1"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=Act as a professional data analyst. Filter and transform the provided job list into a strictly valid JSON array.\n\n### FILTERING CRITERIA:\n1. ONLY include jobs related to: No-code, Low-code, Automation, AI, Software Development (Python, JS, etc.), or Data Engineering.\n2. EXCLUDE everything else: Sales, Marketing, HR, Logistics, Construction, or Manual Management.\n3. The input may include jobs from multiple sources, including Djinni, DOU, and Work.ua (possibly from multiple queries or pages). Include all relevant jobs.\n4. If no jobs match these categories, return an empty array [].\n\n### SCORING & NOTES:\n- Assign \"ai_score\" from 1.0 to 5.0 based on relevance to Automation/AI/No-code.\n- For each job, add a short sentence in \"ai_reason\" (in Ukrainian) explaining why you gave this score.\n- Make sure the description is clean, max 200 characters.\n\n### RULES:\n1. Output ONLY the raw JSON array. No explanations, no markdown blocks.\n2. Fields to create for each job:\n   - \"title\": Job title.\n   - \"company\": Company name.\n   - \"link\": Full URL.\n   - \"description\": Short summary (max 200 chars).\n   - \"source\": \"Djinni\", \"DOU\", or \"Work.ua\".\n   - \"ai_score\": Rate from 1.0 to 5.0.\n   - \"ai_reason\": Short sentence in Ukrainian explaining the relevance.\n\n### DATA TO PROCESS:\n{{ JSON.stringify($json.all_jobs) }}",
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 3.1,
+      "position": [
+        4016,
+        656
+      ],
+      "id": "188dc1bf-46be-40ef-b1cd-a6a96a47b33b",
+      "name": "Agent filters and formats vacancies1"
+    },
+    {
+      "parameters": {
+        "url": "https://djinni.co/jobs/rss/?primary_keyword=No%20Code&exp_level=no_exp&exp_level=1y",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.rssFeedRead",
+      "typeVersion": 1.2,
+      "position": [
+        3120,
+        672
+      ],
+      "id": "83fb271f-c8ab-405f-8626-3cf42ae6d840",
+      "name": "RSS Djini1",
+      "notes": "Джині ванасії"
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\n\nif (items.length === 0) {\n  return [];\n}\n\nconst data = items[0].json;\nconst results = [];\n\n// Проходимо по масиву заголовків (їх 4, як і вакансій)\nfor (let i = 0; i < data.title.length; i++) {\n  results.push({\n    json: {\n      title: data.title[i],\n      // В описі беремо кожен другий елемент (0, 2, 4, 6), бо між ними сміття\n      description: data.description[i * 2] \n        ? data.description[i * 2].replace(/\\n/g, ' ').trim() \n        : '',\n      link: 'https://www.work.ua' + data.link[i],\n      pubDate: data.pubDate[i]\n    }\n  });\n}\n\nreturn results;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3120,
+        1040
+      ],
+      "id": "935e0f4a-4f3e-4064-8540-8a7e90a61bd3",
+      "name": "Normalize Jobs1"
+    },
+    {
+      "parameters": {
+        "url": "https://www.work.ua/jobs-remote-nocode/",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        2704,
+        1040
+      ],
+      "id": "c8bc6245-4f8e-4afa-94ed-744a3d49b21b",
+      "name": "Work UA request1"
+    },
+    {
+      "parameters": {
+        "url": "https://jobs.dou.ua/vacancies/feeds/?search=No%20Code&exp=0-1",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "User-Agent",
+              "value": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        2704,
+        832
+      ],
+      "id": "e1a7f66d-d908-4a7f-9aaa-ae5bb5d5a6de",
+      "name": "DOU request1"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Ми беремо шлях, який ти бачив у себе в Output, і перетворюємо його на список\nconst items = $input.first().json.rss.channel.item;\n\n// Якщо вакансія лише одна, DOU присилає її як об'єкт. \n// Якщо багато — як масив. Робимо, щоб завжди був масив для n8n:\nreturn Array.isArray(items) ? items.map(i => ({ json: i })) : [{ json: items }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3120,
+        832
+      ],
+      "id": "c956ae3a-680e-4b03-a355-9ff671fb8b2c",
+      "name": "Parse RSS data1"
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst LIMIT = 10; // скільки вакансій максимум показати\n\n// 1. Сортуємо за оцінкою (від високого до низького)\nitems.sort((a, b) => b.json.ai_score - a.json.ai_score);\n\n// 2. Застосовуємо ліміт\nconst topJobs = items.slice(0, LIMIT);\n\n// 3. Формуємо HTML повідомлення\nlet message = `\n<div style=\"font-family: Arial, sans-serif; line-height:1.5; color:#333;\">\n  <h2 style=\"color:#1a73e8;\">🚀 ТОП вакансій для тебе</h2>\n`;\n\nfor (const item of topJobs) {\n  const job = item.json;\n  \n  // Відділяємо “круті” вакансії\n  let borderColor = job.ai_score >= 4 ? \"#f39c12\" : \"#ddd\"; // помаранчевий для крутих\n  let background = job.ai_score >= 4 ? \"#fff7e6\" : \"#f9f9f9\"; // світлий помаранчевий для крутих\n\n  // Зірки\n  let stars = \"⭐️\".repeat(Math.round(job.ai_score));\n\n  message += `\n    <div style=\"border:2px solid ${borderColor}; padding:10px; margin-bottom:15px; border-radius:8px; background:${background};\">\n      <h3 style=\"margin:0;\">${stars} ${job.title}</h3>\n      <p style=\"margin:5px 0;\"><strong>Компанія:</strong> ${job.company}</p>\n      <p style=\"margin:5px 0;\"><em>${job.ai_reason}</em></p>\n      <p style=\"margin:5px 0;\"><a href=\"${job.link}\" style=\"color:#1a73e8; text-decoration:none;\">Відкрити вакансію</a></p>\n    </div>\n  `;\n}\n\nmessage += `</div>`;\n\n// 4. Повертаємо готовий HTML\nreturn [{ json: { full_message: message } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4992,
+        928
+      ],
+      "id": "521123e4-2c1b-4525-8059-fbeb9ef8d75b",
+      "name": "get only higher than score "
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        2240,
+        704
+      ],
+      "id": "6085dd14-0373-48bc-86bd-abf2c9b8667e",
+      "name": "When clicking ‘Execute workflow’"
+    },
+    {
+      "parameters": {
+        "fromEmail": "f4u4b4d@gmail.com",
+        "toEmail": "f4u4b4d@gmail.com",
+        "subject": "Свіжа робота ",
+        "html": "={{$json.full_message}}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [
+        5200,
+        928
+      ],
+      "id": "bfd07504-7d1a-4ad3-b8f4-4e9303ccdc69",
+      "name": "Send an Email",
+      "webhookId": "4fa301d8-a6d1-42d7-8e5a-7f5348ad7bfb",
+      "credentials": {
+        "smtp": {
+          "id": "O0lkweTNeNpqO9UF",
+          "name": "SMTP account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const allItems = $input.all();\n\nconst cleanData = allItems.map(item => {\n  const job = item.json;\n  \n  // Очищаємо текст від HTML-тегів, зайвих переносів рядків та пробілів\n  const cleanDescription = (job.content || job.contentSnippet || \"\")\n    .replace(/<[^>]*>/g, ' ') // Видаляємо всі HTML теги\n    .replace(/\\s+/g, ' ')     // Замінюємо кілька пробілів/ентерів на один пробіл\n    .trim();\n\n  return {\n    title: job.title,\n    link: job.link,\n    // Тепер текст важить набагато менше, але сенс залишився\n    description: cleanDescription, \n    source: job.link.includes('djinni.co') ? 'Djinni' : 'DOU'\n  };\n});\n\nreturn [{\n  json: {\n    total_count: cleanData.length,\n    all_jobs: cleanData\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3712,
+        880
+      ],
+      "id": "2aee5894-e3d5-4acb-9fca-2544f3232efb",
+      "name": "Clean Job"
+    },
+    {
+      "parameters": {
+        "url": "https://www.work.ua/jobs-remote-ai+engineer/",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        2464,
+        1088
+      ],
+      "id": "8e858c58-cfc8-478c-92e4-d8ff1de06ac7",
+      "name": "Work UA request"
+    },
+    {
+      "parameters": {
+        "operation": "extractHtmlContent",
+        "extractionValues": {
+          "values": [
+            {
+              "key": "title",
+              "cssSelector": ".card h2 a",
+              "returnArray": true
+            },
+            {
+              "key": "description",
+              "cssSelector": ".card p",
+              "returnArray": true
+            },
+            {
+              "key": "link",
+              "cssSelector": ".card h2 a",
+              "returnValue": "attribute",
+              "attribute": "href",
+              "returnArray": true
+            },
+            {
+              "key": "pubDate",
+              "cssSelector": ".card time",
+              "returnValue": "attribute",
+              "attribute": "datetime",
+              "returnArray": true
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.html",
+      "typeVersion": 1.2,
+      "position": [
+        2976,
+        1344
+      ],
+      "id": "cdb7d70a-5e95-41c4-9eca-f69e1a2f6342",
+      "name": "HTML"
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\n\nif (items.length === 0) {\n  return [];\n}\n\nconst data = items[0].json;\nconst results = [];\n\n// Проходимо по масиву заголовків (їх 4, як і вакансій)\nfor (let i = 0; i < data.title.length; i++) {\n  results.push({\n    json: {\n      title: data.title[i],\n      // В описі беремо кожен другий елемент (0, 2, 4, 6), бо між ними сміття\n      description: data.description[i * 2] \n        ? data.description[i * 2].replace(/\\n/g, ' ').trim() \n        : '',\n      link: 'https://www.work.ua' + data.link[i],\n      pubDate: data.pubDate[i]\n    }\n  });\n}\n\nreturn results;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3392,
+        1392
+      ],
+      "id": "67047197-0775-4f68-9737-c780a42e850f",
+      "name": "Normalize Jobs"
+    },
+    {
+      "parameters": {
+        "jsCode": "// HTML відповіді HTTP Request\nconst html = $input.first().json.data;\n\nif (typeof html !== 'string') {\n    throw new Error(\"HTML не є рядком, перевір поле з відповіді HTTP Request\");\n}\n\n// Витягуємо всі <li> з пагінації\nconst liMatches = html.match(/<ul class=\"pagination[^>]*\">([\\s\\S]*?)<\\/ul>/i);\n\nlet totalPages = 1;\n\nif (liMatches) {\n    const ulContent = liMatches[1];\n\n    // Всі числа всередині <li> (ігноруємо «Попередня»/«Наступна»)\n    const pageNumbers = [...ulContent.matchAll(/<a[^>]*>(\\d+)<\\/a>|<span[^>]*>(\\d+)<\\/span>/gi)]\n        .map(match => parseInt(match[1] || match[2], 10))\n        .filter(n => !isNaN(n));\n\n    if (pageNumbers.length > 0) {\n        totalPages = Math.max(...pageNumbers); // остання сторінка\n    }\n}\n\n// Базовий URL без параметру ?page\nconst baseUrl = \"https://www.work.ua/jobs-remote-ai+engineer/\";\n\n// Генеруємо масив усіх URL\nconst urls = [];\nfor (let i = 1; i <= totalPages; i++) {\n    urls.push({ json: { url: `${baseUrl}?page=${i}` } });\n}\n\n// Повертаємо масив для наступних нод\nreturn urls;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2624,
+        1312
+      ],
+      "id": "d5fabb6c-3475-400a-b3c7-d482c42c8423",
+      "name": "Code in JavaScript"
+    },
+    {
+      "parameters": {
+        "url": "={{$json.url}}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        2784,
+        1328
+      ],
+      "id": "fa5a24dd-bcee-4dc7-a0ec-32ef05554262",
+      "name": "Work UA request2"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Беремо всі елементи після HTTP Request + HTML Node\nconst allItems = $input.all();\n\n// Ініціалізуємо словник для склеювання всіх сторінок\nlet combined = {\n    title: [],\n    description: [],\n    link: [],\n    pubDate: []\n};\n\n// Проходимо по всіх сторінках і додаємо дані в combined\nallItems.forEach(item => {\n    const page = item.json; // тут кожен item — словник {title:[], description:[], ...}\n    if (page.title) combined.title = combined.title.concat(page.title);\n    if (page.description) combined.description = combined.description.concat(page.description);\n    if (page.link) combined.link = combined.link.concat(page.link);\n    if (page.pubDate) combined.pubDate = combined.pubDate.concat(page.pubDate);\n});\n\n// Повертаємо один елемент масиву з об’єднаним словником\nreturn [\n    { json: combined }\n];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3184,
+        1344
+      ],
+      "id": "f12480bd-ae22-4935-8dc9-c5f0ddca36ed",
+      "name": "combine"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "XML1": {
+      "main": [
+        [
+          {
+            "node": "Parse RSS data1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTML1": {
+      "main": [
+        [
+          {
+            "node": "Normalize Jobs1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge1": {
+      "main": [
+        [
+          {
+            "node": "Clean Job",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Groq Chat Model1": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Agent filters and formats vacancies1",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Schedule Trigger1": {
+      "main": [
+        [
+          {
+            "node": "DOU request1",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Work UA request1",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "RSS Djini1",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Work UA request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Clear old vacancies1": {
+      "main": [
+        [
+          {
+            "node": "Return data for insertion1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Return data for insertion1": {
+      "main": [
+        [
+          {
+            "node": "insertinon of new vacancies1",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "get only higher than score ",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse AI responce1": {
+      "main": [
+        [
+          {
+            "node": "Clear old vacancies1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Agent filters and formats vacancies1": {
+      "main": [
+        [
+          {
+            "node": "Parse AI responce1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "RSS Djini1": {
+      "main": [
+        [
+          {
+            "node": "Merge1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize Jobs1": {
+      "main": [
+        [
+          {
+            "node": "Merge1",
+            "type": "main",
+            "index": 2
+          }
+        ]
+      ]
+    },
+    "Work UA request1": {
+      "main": [
+        [
+          {
+            "node": "HTML1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "DOU request1": {
+      "main": [
+        [
+          {
+            "node": "XML1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse RSS data1": {
+      "main": [
+        [
+          {
+            "node": "Merge1",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "get only higher than score ": {
+      "main": [
+        [
+          {
+            "node": "Send an Email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "When clicking ‘Execute workflow’": {
+      "main": [
+        [
+          {
+            "node": "DOU request1",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Work UA request1",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "RSS Djini1",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Work UA request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Clean Job": {
+      "main": [
+        [
+          {
+            "node": "Agent filters and formats vacancies1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Work UA request": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTML": {
+      "main": [
+        [
+          {
+            "node": "combine",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize Jobs": {
+      "main": [
+        [
+          {
+            "node": "Merge1",
+            "type": "main",
+            "index": 3
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript": {
+      "main": [
+        [
+          {
+            "node": "Work UA request2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Work UA request2": {
+      "main": [
+        [
+          {
+            "node": "HTML",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "combine": {
+      "main": [
+        [
+          {
+            "node": "Normalize Jobs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false
+  },
+  "versionId": "8c87c23d-182b-4aca-b448-f79482f46d0d",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "c5674022872009769c8b83e3189e707e15b254c1b9e48d6b8e871f168c7daed1"
+  },
+  "id": "kheOwbwnfXDgCa2Q",
+  "tags": []
+}
